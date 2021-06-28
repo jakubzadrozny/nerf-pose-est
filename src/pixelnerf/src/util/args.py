@@ -6,9 +6,10 @@ import argparse
 from pyhocon import ConfigFactory
 
 PROJECT_ROOT = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), "..", ".."))
-EXPCONF_PATH = os.path.join(PROJECT_ROOT, "conf/expconf.conf")
-DEFAULT_CONF = os.path.join(PROJECT_ROOT, "conf/default_mv.conf")
+    os.path.dirname(__file__), "..", "..", "..", ".."))
+EXPCONF_PATH = os.path.join(PROJECT_ROOT, "conf", "pixelnerf", "expconf.conf")
+DEFAULT_CONF = os.path.join(
+    PROJECT_ROOT, "conf", "pixelnerf", "default_mv.conf")
 
 
 def default_conf(name="example"):
