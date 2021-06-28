@@ -123,8 +123,14 @@ class BOPDataset:
                 t = np.array(annotation[n]['cam_t_m2c']) * 0.001
                 obj_id = annotation[n]['obj_id']
                 name = f'obj_{int(obj_id):06d}'
+                bbox_visib = np.array(visib[n]['bbox_visib'])
+                x, y, w, h = bbox_visib
+                x1 = x
+                y1 = y
+                x2 = x + w
+                y2 = y + h
                 obj = dict(label=name, name=name, R=R, t=t,
-                           id_in_segm=n+1)
+                           id_in_segm=n+1, bbox=[x1, y1, x2, y2])
                 objects.append(obj)
 
             mask_path = scene_dir / 'mask_visib' / f'{view_id_str}_all.png'
