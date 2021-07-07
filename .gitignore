@@ -1,1 +1,7 @@
 .vscode/
+/data/
+__pycache__/
+checkpoints/
+logs/
+visuals/
+.ipynb_checkpoints/

@@ -1,0 +1,27 @@
+# run: conda env create -f environment.yml
+name: nerfpose
+channels:
+  - pytorch
+  - defaults
+  - conda-forge
+dependencies:
+  - python>=3.8
+  - pip
+  - scipy
+  - numpy
+  - pandas
+  - opencv
+  - imageio
+  - imageio-ffmpeg    
+  - dotmap
+  - pyhocon
+  - ipdb
+  - lpips
+  - matplotlib
+  - pytorch
+  - torchvision
+  - scikit-image
+  - tqdm
+  - pyarrow
+  - tensorboard
+  - pretrainedmodels

@@ -7,19 +7,22 @@ import pandas as pd
 import torch
 from PIL import Image
 
+from src.transform import Transform
+
 
 def build_index(ds_dir, save_file, split, save_file_annotations):
     try:
         dir_mtime = ds_dir.stat().st_mtime
         cached_mtime = save_file.stat().st_mtime
         annotations_mtime = save_file_annotations.stat().st_mtime
-        if dir_mtime == cached_mtime or dir_mtime == annotations_mtime:
+        if cached_mtime >= dir_mtime and annotations_mtime >= dir_mtime:
+            print(f'Using cached index and annotations...')
             return
     except FileNotFoundError:
         pass
 
     print(f'Building index and loading annotations...')
-    scene_ids, cam_ids, view_ids = [], [], []
+    scene_ids, view_ids, visib_objects = [], [], []
     annotations = dict()
     base_dir = ds_dir / split
 
@@ -36,13 +39,16 @@ def build_index(ds_dir, save_file, split, save_file_annotations):
         annotations[scene_id] = annotations_scene
         # for view_id in annotations_scene['scene_gt_info'].keys():
         for view_id in annotations_scene['scene_camera'].keys():
-            cam_id = 'cam'
             scene_ids.append(int(scene_id))
-            cam_ids.append(cam_id)
             view_ids.append(int(view_id))
+            visib_objects.append([
+                obj["obj_id"] for idx, obj in enumerate(annotations_scene["scene_gt"][view_id])
+                if annotations_scene["scene_gt_info"][view_id][idx]["visib_fract"] > 0.8 and
+                annotations_scene["scene_gt_info"][view_id][idx]["px_count_visib"] > 500
+            ])
 
-    frame_index = pd.DataFrame({'scene_id': scene_ids, 'cam_id': cam_ids,
-                                'view_id': view_ids, 'cam_name': cam_ids})
+    frame_index = pd.DataFrame(
+        {'scene_id': scene_ids, 'view_id': view_ids, 'visib_objects': visib_objects})
     frame_index.to_feather(save_file)
     save_file_annotations.write_bytes(pickle.dumps(annotations))
     return
@@ -101,14 +107,8 @@ class BOPDataset:
 
         cam_annotation = self.annotations[scene_id_str]['scene_camera'][str(
             view_id)]
-        if 'cam_R_w2c' in cam_annotation:
-            R = np.array(cam_annotation['cam_R_w2c']).reshape(3, 3)
-            t = np.array(cam_annotation['cam_t_w2c']) * 0.001
-        else:
-            R = np.eye(3)
-            t = np.zeros(3)
         K = np.array(cam_annotation['cam_K']).reshape(3, 3)
-        camera = dict(R=R, K=K, t=t, resolution=rgb.shape[:2])
+        camera = dict(K=K, resolution=rgb.shape[:2])
 
         objects = []
         mask = np.zeros((h, w), dtype=np.uint8)
@@ -121,6 +121,7 @@ class BOPDataset:
             for n in range(n_objects):
                 R = np.array(annotation[n]['cam_R_m2c']).reshape(3, 3)
                 t = np.array(annotation[n]['cam_t_m2c']) * 0.001
+                T = Transform(R, t)
                 obj_id = annotation[n]['obj_id']
                 name = f'obj_{int(obj_id):06d}'
                 bbox_visib = np.array(visib[n]['bbox_visib'])
@@ -129,7 +130,7 @@ class BOPDataset:
                 y1 = y
                 x2 = x + w
                 y2 = y + h
-                obj = dict(label=name, name=name, R=R, t=t,
+                obj = dict(label=name, T=T,
                            id_in_segm=n+1, bbox=[x1, y1, x2, y2])
                 objects.append(obj)
 

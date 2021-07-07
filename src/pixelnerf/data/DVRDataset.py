@@ -52,6 +52,7 @@ class DVRDataset(torch.utils.data.Dataset):
             file_lists = [os.path.join(x, list_prefix + "test.lst") for x in cats]
 
         all_objs = []
+        print(file_lists)
         for file_list in file_lists:
             if not os.path.exists(file_list):
                 continue

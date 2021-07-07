@@ -19,7 +19,8 @@ class PixelNeRFNet(torch.nn.Module):
         """
         super().__init__()
         self.encoder = make_encoder(conf["encoder"])
-        self.use_encoder = conf.get_bool("use_encoder", True)  # Image features?
+        self.use_encoder = conf.get_bool(
+            "use_encoder", True)  # Image features?
 
         self.use_xyz = conf.get_bool("use_xyz", False)
 
@@ -61,14 +62,16 @@ class PixelNeRFNet(torch.nn.Module):
 
         if self.use_global_encoder:
             # Global image feature
-            self.global_encoder = ImageEncoder.from_conf(conf["global_encoder"])
+            self.global_encoder = ImageEncoder.from_conf(
+                conf["global_encoder"])
             self.global_latent_size = self.global_encoder.latent_size
             d_latent += self.global_latent_size
 
         d_out = 4
 
         self.latent_size = self.encoder.latent_size
-        self.mlp_coarse = make_mlp(conf["mlp_coarse"], d_in, d_latent, d_out=d_out)
+        self.mlp_coarse = make_mlp(
+            conf["mlp_coarse"], d_in, d_latent, d_out=d_out)
         self.mlp_fine = make_mlp(
             conf["mlp_fine"], d_in, d_latent, d_out=d_out, allow_empty=True
         )
@@ -119,26 +122,31 @@ class PixelNeRFNet(torch.nn.Module):
         # Handle various focal length/principal point formats
         if len(focal.shape) == 0:
             # Scalar: fx = fy = value for all views
-            focal = focal[None, None].repeat((1, 2))
+            focal = torch.full((self.num_objs, 1, 2), focal)
         elif len(focal.shape) == 1:
             # Vector f: fx = fy = f_i *for view i*
             # Length should match NS (or 1 for broadcast)
-            focal = focal.unsqueeze(-1).repeat((1, 2))
-        else:
-            focal = focal.clone()
-        self.focal = focal.float()
+            focal = focal[:, None, None].repeat((1, 1, 2))
+        elif len(focal.shape) == 2:
+            # (fx, fy) per object in SB
+            focal = focal.unsqueeze(1)
+        self.focal = focal.clone().float()
         self.focal[..., 1] *= -1.0
 
         if c is None:
             # Default principal point is center of image
-            c = (self.image_shape * 0.5).unsqueeze(0)
+            cx = torch.full((self.num_objs, 1, 1), self.image_shape[0] * 0.5)
+            cy = torch.full((self.num_objs, 1, 1), self.image_shape[1] * 0.5)
+            c = torch.cat((cx, cy), dim=-1)
         elif len(c.shape) == 0:
             # Scalar: cx = cy = value for all views
-            c = c[None, None].repeat((1, 2))
+            c = torch.full((self.num_objs, 1, 2), c)
         elif len(c.shape) == 1:
             # Vector c: cx = cy = c_i *for view i*
-            c = c.unsqueeze(-1).repeat((1, 2))
-        self.c = c
+            c = c[:, None, None].repeat((1, 1, 2))
+        elif len(c.shape) == 2:
+            c = c.unsqueeze(1)
+        self.c = c.clone()
 
         if self.use_global_encoder:
             self.global_encoder(images)
@@ -173,7 +181,8 @@ class PixelNeRFNet(torch.nn.Module):
                         z_feature = xyz.reshape(-1, 3)  # (SB*B, 3)
                 else:
                     if self.normalize_z:
-                        z_feature = -xyz_rot[..., 2].reshape(-1, 1)  # (SB*B, 1)
+                        z_feature = -xyz_rot[...,
+                                             2].reshape(-1, 1)  # (SB*B, 1)
                     else:
                         z_feature = -xyz[..., 2].reshape(-1, 1)  # (SB*B, 1)
 
@@ -186,7 +195,8 @@ class PixelNeRFNet(torch.nn.Module):
                     assert viewdirs is not None
                     # Viewdirs to input view space
                     viewdirs = viewdirs.reshape(SB, B, 3, 1)
-                    viewdirs = repeat_interleave(viewdirs, NS)  # (SB*NS, B, 3, 1)
+                    viewdirs = repeat_interleave(
+                        viewdirs, NS)  # (SB*NS, B, 3, 1)
                     viewdirs = torch.matmul(
                         self.poses[:, None, :3, :3], viewdirs
                     )  # (SB*NS, B, 3, 1)
@@ -203,13 +213,21 @@ class PixelNeRFNet(torch.nn.Module):
 
             if self.use_encoder:
                 # Grab encoder's latent code.
-                uv = -xyz[:, :, :2] / xyz[:, :, 2:]  # (SB, B, 2)
-                uv *= repeat_interleave(
-                    self.focal.unsqueeze(1), NS if self.focal.shape[0] > 1 else 1
-                )
-                uv += repeat_interleave(
-                    self.c.unsqueeze(1), NS if self.c.shape[0] > 1 else 1
-                )  # (SB*NS, B, 2)
+                uv = -xyz[:, :, :2] / xyz[:, :, 2:]  # (SB*NS, B, 2)
+                if self.focal.shape[1] == 1:
+                    uv *= repeat_interleave(
+                        self.focal, NS if self.focal.shape[0] > 1 else 1
+                    )
+                else:
+                    uv *= self.focal.reshape(-1, 2).unsqueeze(1)
+
+                if self.c.shape[1] == 1:
+                    uv += repeat_interleave(
+                        self.c, NS if self.c.shape[0] > 1 else 1
+                    )  # (SB*NS, B, 2)
+                else:
+                    uv += self.c.reshape(-1, 2).unsqueeze(1)
+
                 latent = self.encoder.index(
                     uv, None, self.image_shape
                 )  # (SB * NS, latent, B)
@@ -308,7 +326,8 @@ class PixelNeRFNet(torch.nn.Module):
         backup_name = "pixel_nerf_init_backup" if opt_init else "pixel_nerf_backup"
 
         ckpt_path = osp.join(args.checkpoints_path, args.name, ckpt_name)
-        ckpt_backup_path = osp.join(args.checkpoints_path, args.name, backup_name)
+        ckpt_backup_path = osp.join(
+            args.checkpoints_path, args.name, backup_name)
 
         if osp.exists(ckpt_path):
             copyfile(ckpt_path, ckpt_backup_path)

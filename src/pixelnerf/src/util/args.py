@@ -22,7 +22,7 @@ def default_conf(name="example"):
 def parse_args(
     callback=None,
     training=False,
-    default_conf="conf/default_mv.conf",
+    default_conf=DEFAULT_CONF,
     default_expname="example",
     default_data_format="dvr",
     default_num_epochs=10000000,

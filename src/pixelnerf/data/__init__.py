@@ -30,8 +30,7 @@ def get_split_dataset(dataset_type, datadir, want_split="all", training=True, **
         dset_class = DVRDataset
         if dataset_type == "dvr_gen":
             # For generalization training (train some categories, eval on others)
-            # flags["list_prefix"] = "gen_"
-            pass
+            flags["list_prefix"] = "gen_"
         elif dataset_type == "dvr_dtu":
             # DTU dataset
             flags["list_prefix"] = "new_"

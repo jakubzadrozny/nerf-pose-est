@@ -38,7 +38,8 @@ def batched_index_select_nd(t, inds):
     :return (batch, k, ...)
     """
     return t.gather(
-        1, inds[(...,) + (None,) * (len(t.shape) - 2)].expand(-1, -1, *t.shape[2:])
+        1, inds[(...,) + (None,) * (len(t.shape) - 2)
+                ].expand(-1, -1, *t.shape[2:])
     )
 
 
@@ -50,7 +51,8 @@ def batched_index_select_nd_last(t, inds):
     :param inds (batch..., k)
     :return (batch..., n, k)
     """
-    dummy = inds.unsqueeze(-2).expand(*inds.shape[:-1], t.size(-2), inds.size(-1))
+    dummy = inds.unsqueeze(-2).expand(*
+                                      inds.shape[:-1], t.size(-2), inds.size(-1))
     out = t.gather(-1, dummy)
     return out
 
@@ -70,7 +72,8 @@ def get_image_to_tensor_balanced(image_size=0):
     if image_size > 0:
         ops.append(transforms.Resize(image_size))
     ops.extend(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),]
+        [transforms.ToTensor(), transforms.Normalize(
+            (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), ]
     )
     return transforms.Compose(ops)
 
@@ -101,7 +104,8 @@ def gen_grid(*args, ij_indexing=False):
     return torch.from_numpy(
         np.vstack(
             np.meshgrid(
-                *(np.linspace(lo, hi, sz, dtype=np.float32) for lo, hi, sz in args),
+                *(np.linspace(lo, hi, sz, dtype=np.float32)
+                  for lo, hi, sz in args),
                 indexing="ij" if ij_indexing else "xy"
             )
         )
@@ -242,24 +246,22 @@ def gen_rays(poses, width, height, focal, z_near, z_far, c=None, ndc=False):
     """
     num_images = poses.shape[0]
     device = poses.device
-    cam_unproj_map = (
-        unproj_map(width, height, focal.squeeze(), c=c, device=device)
-        .unsqueeze(0)
-        .repeat(num_images, 1, 1, 1)
-    )
+    if len(focal.shape) == 2:
+        cam_unproj_map = torch.stack([
+            unproj_map(width, height, focal[img_idx],
+                       c=c[img_idx], device=device)
+            for img_idx in range(num_images)
+        ], axis=0)
+    else:
+        cam_unproj_map = (
+            unproj_map(width, height, focal.squeeze(), c=c, device=device)
+            .unsqueeze(0)
+            .repeat(num_images, 1, 1, 1)
+        )
     cam_centers = poses[:, None, None, :3, 3].expand(-1, height, width, -1)
     cam_raydir = torch.matmul(
         poses[:, None, None, :3, :3], cam_unproj_map.unsqueeze(-1)
     )[:, :, :, :, 0]
-    if ndc:
-        if not (z_near == 0 and z_far == 1):
-            warnings.warn(
-                "dataset z near and z_far not compatible with NDC, setting them to 0, 1 NOW"
-            )
-        z_near, z_far = 0.0, 1.0
-        cam_centers, cam_raydir = ndc_rays(
-            width, height, focal, 1.0, cam_centers, cam_raydir
-        )
 
     cam_nears = (
         torch.tensor(z_near, device=device)
@@ -278,7 +280,7 @@ def gen_rays(poses, width, height, focal, z_near, z_far, c=None, ndc=False):
 
 def trans_t(t):
     return torch.tensor(
-        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, t], [0, 0, 0, 1],], dtype=torch.float32,
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, t], [0, 0, 0, 1], ], dtype=torch.float32,
     )
 
 
@@ -347,7 +349,8 @@ def get_norm_layer(norm_type="instance", group_norm_groups=32):
     elif norm_type == "none":
         norm_layer = None
     else:
-        raise NotImplementedError("normalization layer [%s] is not found" % norm_type)
+        raise NotImplementedError(
+            "normalization layer [%s] is not found" % norm_type)
     return norm_layer
 
 
@@ -378,7 +381,8 @@ def make_conv_2d(
         elif padding_type == "zero":
             conv_block += [nn.ZeroPad2d(amt)]
         else:
-            raise NotImplementedError("padding [%s] is not implemented" % padding_type)
+            raise NotImplementedError(
+                "padding [%s] is not implemented" % padding_type)
 
     conv_block.append(
         nn.Conv2d(
@@ -402,7 +406,8 @@ def calc_same_pad_conv2d(t_shape, kernel_size=3, stride=1):
     out_height = math.ceil(in_height / stride)
     out_width = math.ceil(in_width / stride)
 
-    pad_along_height = max((out_height - 1) * stride + kernel_size - in_height, 0)
+    pad_along_height = max((out_height - 1) * stride +
+                           kernel_size - in_height, 0)
     pad_along_width = max((out_width - 1) * stride + kernel_size - in_width, 0)
     pad_top = pad_along_height // 2
     pad_bottom = pad_along_height - pad_top
