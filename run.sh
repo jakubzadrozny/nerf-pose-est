@@ -11,7 +11,7 @@
 # 
 # See 'System configuration' part of this manual for information about
 # available cores.
-#SBATCH --cpus-per-task=8 
+#SBATCH --cpus-per-task=8
 # You can further define the number of tasks with --ntasks-per-*
 # See "man sbatch" for details. e.g. --ntasks=4 will ask for 4 cpus.
 
@@ -20,7 +20,7 @@
 # force-stopped by the server. If you make the expected time too long, it will
 # take longer for the job to start. Here, we say the job will take 5 minutes.
 #              d-hh:mm:ss
-#SBATCH --time=0-12:00:00
+#SBATCH --time=1-00:00:00
 
 # Define the partition on which the job shall run. May be omitted.
 # See 'System configuration' for info about available partitions
@@ -30,7 +30,7 @@
 # --mem will define memory per node and
 # --mem-per-cpu will define memory per CPU/core. Choose one of those.
 ##SBATCH --mem-per-cpu=1500MB
-#SBATCH --mem=32GB    # this one is not in effect, due to the double hash
+#SBATCH --mem=16GB    # this one is not in effect, due to the double hash
 
 # Turn on mail notification. There are many possible self-explaining values:
 # NONE, BEGIN, END, FAIL, ALL (including all aforementioned)
@@ -44,30 +44,30 @@
 # Define and create a unique scratch directory for this job
 # /lscratch is local ssd disk on particular node which is faster
 # than your network home dir
-SCRATCH_DIRECTORY=/lscratch/${USER}/${SLURM_JOBID}
-mkdir -p ${SCRATCH_DIRECTORY}
-cd ${SCRATCH_DIRECTORY}
+# SCRATCH_DIRECTORY=/lscratch/${USER}/${SLURM_JOBID}
+# mkdir -p ${SCRATCH_DIRECTORY}
+# cd ${SCRATCH_DIRECTORY}
 
 # You can copy everything you need to the scratch directory
 # ${SLURM_SUBMIT_DIR} points to the path where this script was
 # submitted from (usually in your network home dir)
-cp -R ${SLURM_SUBMIT_DIR}/* ${SCRATCH_DIRECTORY}
+# cp -R ${SLURM_SUBMIT_DIR}/* ${SCRATCH_DIRECTORY}
 
 # This is where the actual work is done. In this case, the script only waits.
 # The time command is optional, but it may give you a hint on how long the
 # command worked
-module purge
+ml purge
 module load fosscuda/2019a
 module load Anaconda3
 nvidia-smi
-
+. /opt/apps/software/Anaconda3/5.0.1/etc/profile.d/conda.sh
 conda activate nerfpose
-python -m src.pixelnerf.train.train -n sn64 --resume -B 12 -R 256 -E 250000
+python -m src.pixelnerf.train -n sn64_aug --resume -R 512 --ncpus=8
 
 # After the job is done we copy our output back to $SLURM_SUBMIT_DIR
-cp -R ${SCRATCH_DIRECTORY}/checkpoints ${SLURM_SUBMIT_DIR}
-cp -R ${SCRATCH_DIRECTORY}/logs ${SLURM_SUBMIT_DIR}
-cp -R ${SCRATCH_DIRECTORY}/visuals ${SLURM_SUBMIT_DIR}
+# cp -R ${SCRATCH_DIRECTORY}/checkpoints ${SLURM_SUBMIT_DIR}
+# cp -R ${SCRATCH_DIRECTORY}/logs ${SLURM_SUBMIT_DIR}
+# cp -R ${SCRATCH_DIRECTORY}/visuals ${SLURM_SUBMIT_DIR}
 
 # In addition to the copied files, you will also find a file called
 # slurm-1234.out in the submit directory. This file will contain all output that
@@ -76,8 +76,8 @@ cp -R ${SCRATCH_DIRECTORY}/visuals ${SLURM_SUBMIT_DIR}
 # After everything is saved to the home directory, delete the work directory to
 # save space on /lscratch
 # old files in /lscratch will be deleted automatically after some time
-cd ${SLURM_SUBMIT_DIR}
-rm -rf ${SCRATCH_DIRECTORY}
+# cd ${SLURM_SUBMIT_DIR}
+# rm -rf ${SCRATCH_DIRECTORY}
 
 # Finish the script
 exit 0

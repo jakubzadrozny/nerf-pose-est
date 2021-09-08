@@ -11,16 +11,6 @@ from src.transform import Transform
 
 
 def build_index(ds_dir, save_file, split, save_file_annotations):
-    try:
-        dir_mtime = ds_dir.stat().st_mtime
-        cached_mtime = save_file.stat().st_mtime
-        annotations_mtime = save_file_annotations.stat().st_mtime
-        if cached_mtime >= dir_mtime and annotations_mtime >= dir_mtime:
-            print(f'Using cached index and annotations...')
-            return
-    except FileNotFoundError:
-        pass
-
     print(f'Building index and loading annotations...')
     scene_ids, view_ids, visib_objects = [], [], []
     annotations = dict()

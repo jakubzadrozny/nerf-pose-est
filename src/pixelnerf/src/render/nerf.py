@@ -5,11 +5,11 @@ https://github.com/bmild/nerf
 https://github.com/kwea123/nerf_pl
 """
 import torch
-import torch.nn.functional as F
-from .. import util
 import torch.autograd.profiler as profiler
 from torch.nn import DataParallel
 from dotmap import DotMap
+
+from src.pixelnerf.src import util
 
 
 class _RenderWrapper(torch.nn.Module):
@@ -40,6 +40,9 @@ class _RenderWrapper(torch.nn.Module):
         else:
             # Make DotMap to dict to support DataParallel
             return outputs.toDict()
+
+    def render_view(self, *args, **kwargs):
+        return self.renderer.render_view(self.net, *args, **kwargs)
 
 
 class NeRFRenderer(torch.nn.Module):
@@ -80,6 +83,7 @@ class NeRFRenderer(torch.nn.Module):
         self.depth_std = depth_std
 
         self.eval_batch_size = eval_batch_size
+        print("Eval batch size:", self.eval_batch_size)
         self.white_bkgd = white_bkgd
         self.lindisp = lindisp
         if lindisp:
@@ -106,13 +110,15 @@ class NeRFRenderer(torch.nn.Module):
 
         step = 1.0 / self.n_coarse
         B = rays.shape[0]
-        z_steps = torch.linspace(0, 1 - step, self.n_coarse, device=device)  # (Kc)
+        z_steps = torch.linspace(
+            0, 1 - step, self.n_coarse, device=device)  # (Kc)
         z_steps = z_steps.unsqueeze(0).repeat(B, 1)  # (B, Kc)
         z_steps += torch.rand_like(z_steps) * step
         if not self.lindisp:  # Use linear sampling in depth space
             return near * (1 - z_steps) + far * z_steps  # (B, Kf)
         else:  # Use linear sampling in disparity space
-            return 1 / (1 / near * (1 - z_steps) + 1 / far * z_steps)  # (B, Kf)
+            # (B, Kf)
+            return 1 / (1 / near * (1 - z_steps) + 1 / far * z_steps)
 
         # Use linear sampling in depth space
         return near * (1 - z_steps) + far * z_steps  # (B, Kc)
@@ -144,7 +150,8 @@ class NeRFRenderer(torch.nn.Module):
         if not self.lindisp:  # Use linear sampling in depth space
             z_samp = near * (1 - z_steps) + far * z_steps  # (B, Kf)
         else:  # Use linear sampling in disparity space
-            z_samp = 1 / (1 / near * (1 - z_steps) + 1 / far * z_steps)  # (B, Kf)
+            z_samp = 1 / (1 / near * (1 - z_steps) +
+                          1 / far * z_steps)  # (B, Kf)
         return z_samp
 
     def sample_fine_depth(self, rays, depth):
@@ -182,10 +189,12 @@ class NeRFRenderer(torch.nn.Module):
             deltas = torch.cat([deltas, delta_inf], -1)  # (B, K)
 
             # (B, K, 3)
-            points = rays[:, None, :3] + z_samp.unsqueeze(2) * rays[:, None, 3:6]
+            points = rays[:, None, :3] + \
+                z_samp.unsqueeze(2) * rays[:, None, 3:6]
             points = points.reshape(-1, 3)  # (B*K, 3)
 
-            use_viewdirs = hasattr(model, "use_viewdirs") and model.use_viewdirs
+            use_viewdirs = hasattr(
+                model, "use_viewdirs") and model.use_viewdirs
 
             val_all = []
             if sb > 0:
@@ -198,7 +207,8 @@ class NeRFRenderer(torch.nn.Module):
                 eval_batch_size = self.eval_batch_size
                 eval_batch_dim = 0
 
-            split_points = torch.split(points, eval_batch_size, dim=eval_batch_dim)
+            split_points = torch.split(
+                points, eval_batch_size, dim=eval_batch_dim)
             if use_viewdirs:
                 dim1 = K
                 viewdirs = rays[:, None, 3:6].expand(-1, dim1, -1)  # (B, K, 3)
@@ -302,6 +312,49 @@ class NeRFRenderer(torch.nn.Module):
 
             return outputs
 
+    def render_view(self, model, inputs, targets, z_near, z_far, ray_batch_size=512):
+        device = next(model.parameters()).device
+        BS = inputs["images"].shape[0]
+        H = targets["H"]
+        W = targets["W"]
+
+        all_imgs = []
+        with torch.no_grad():
+            for idx in range(BS):
+                target_pose = targets["poses"][idx].to(device=device)
+                target_focal = targets["focal"][idx].to(device=device)
+                target_c = targets.get("c", None)
+                if target_c is not None:
+                    target_c = target_c[idx].to(device=device)
+
+                cam_rays = util.gen_rays(
+                    target_pose.unsqueeze(0), W, H, target_focal, z_near, z_far, c=target_c
+                )
+
+                input_img = inputs["images"][idx].to(device=device)
+                input_pose = inputs["poses"][idx].to(device=device)
+                input_focal = inputs["focal"][idx].to(device=device)
+                input_c = inputs.get("c", None)
+                if input_c is not None:
+                    input_c = input_c[idx].to(device=device)
+                model.encode(
+                    input_img.unsqueeze(0),
+                    input_pose.unsqueeze(0),
+                    input_focal.unsqueeze(0),
+                    c=input_c.unsqueeze(0) if input_c is not None else None,
+                )
+
+                all_rgb_fine = []
+                for rays in torch.split(cam_rays.view(-1, 8), ray_batch_size, dim=0):
+                    render_dict = DotMap(self(model, rays.unsqueeze(0)))
+                    all_rgb_fine.append(render_dict.fine.rgb[0])
+
+                # rgb_fine (V*H*W, 3)
+                rgb_fine = torch.cat(all_rgb_fine, dim=0)
+                all_imgs.append(rgb_fine.reshape(H, W, 3).cpu())
+
+        return all_imgs
+
     def _format_outputs(
         self, rendered_outputs, superbatch_size, want_weights=False,
     ):
@@ -367,5 +420,5 @@ class NeRFRenderer(torch.nn.Module):
         wrapped = _RenderWrapper(net, self, simple_output=simple_output)
         if gpus is not None and len(gpus) > 1:
             print("Using multi-GPU", gpus)
-            wrapped = torch.nn.DataParallel(wrapped, gpus, dim=1)
+            wrapped = DataParallel(wrapped, gpus, dim=1)
         return wrapped

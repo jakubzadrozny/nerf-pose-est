@@ -9,6 +9,8 @@ import functools
 import math
 import warnings
 
+from src.inerf.lieutils import SO3Exp
+
 
 def image_float_to_uint8(img):
     """
@@ -206,6 +208,17 @@ def get_cuda(gpu_id):
     )
 
 
+def stratified_masked_sample(masks, num_pix):
+    BS = masks.shape[0]
+    all_pix = []
+    for i in range(BS):
+        inside = (masks[i].nonzero(as_tuple=False))
+        pix = inside[torch.randint(0, inside.shape[0], (num_pix,))]
+        all_pix.append(pix)
+    all_pix = torch.stack(all_pix, dim=0)
+    return all_pix
+
+
 def masked_sample(masks, num_pix, prop_inside, thresh=0.5):
     """
     :return (num_pix, 3)
@@ -239,6 +252,26 @@ def bbox_sample(bboxes, num_pix):
     return pix
 
 
+def stratified_bbox_sample(bboxes, num_pix):
+    """
+    :return (BS, num_pix, 2)
+    """
+    BS = bboxes.shape[0]
+    bboxes = bboxes.unsqueeze(2)
+    x = (
+        torch.rand(BS, num_pix, device=bboxes.device) *
+        (bboxes[:, 2] + 1 - bboxes[:, 0])
+        + bboxes[:, 0]
+    ).long()
+    y = (
+        torch.rand(BS, num_pix, device=bboxes.device) *
+        (bboxes[:, 3] + 1 - bboxes[:, 1])
+        + bboxes[:, 1]
+    ).long()
+    pix = torch.stack((y, x), dim=-1)
+    return pix
+
+
 def gen_rays(poses, width, height, focal, z_near, z_far, c=None, ndc=False):
     """
     Generate camera rays
@@ -248,13 +281,16 @@ def gen_rays(poses, width, height, focal, z_near, z_far, c=None, ndc=False):
     device = poses.device
     if len(focal.shape) == 2:
         cam_unproj_map = torch.stack([
-            unproj_map(width, height, focal[img_idx],
-                       c=c[img_idx], device=device)
+            unproj_map(width,
+                       height,
+                       focal[img_idx],
+                       c=c[img_idx] if c is not None else None,
+                       device=device)
             for img_idx in range(num_images)
         ], axis=0)
     else:
         cam_unproj_map = (
-            unproj_map(width, height, focal.squeeze(), c=c, device=device)
+            unproj_map(width, height, focal, c=c, device=device)
             .unsqueeze(0)
             .repeat(num_images, 1, 1, 1)
         )
@@ -323,6 +359,20 @@ def pose_spherical(theta, phi, radius):
         @ c2w
     )
     return c2w
+
+
+def SO3_spherical(angle_params, log_r):
+    BS = angle_params.shape[0]
+    R = SO3Exp(angle_params)
+    t0 = R[:, :3, 2]
+    t = torch.exp(log_r).unsqueeze(
+        1) / torch.sqrt(torch.sum(t0 ** 2, dim=-1, keepdim=True)) * t0
+    hom = torch.zeros((BS, 4, 4), dtype=torch.float,
+                      device=angle_params.device)
+    hom[:, :3, :3] = R
+    hom[:, :3, 3] = t
+    hom[:, 3, 3] = 1
+    return hom
 
 
 def count_parameters(model):

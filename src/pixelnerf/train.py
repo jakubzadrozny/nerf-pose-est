@@ -3,10 +3,11 @@
 
 import os
 import numpy as np
+import random
 import torch
 from dotmap import DotMap
 
-from src.pixelnerf.train import trainlib
+from src import trainlib
 from src.pixelnerf.src.model import make_model, loss
 from src.pixelnerf.src.render import NeRFRenderer
 from src.pixelnerf.src import util
@@ -330,21 +331,43 @@ class PixelNeRFTrainer(trainlib.Trainer):
 
 
 if __name__ == '__main__':
+    torch.manual_seed(42)
+    random.seed(42)
+    np.random.seed(42)
+
     args, conf = util.args.parse_args(
         extra_args, training=True, default_ray_batch_size=128)
     device = util.get_cuda(args.gpu_id[0])
     print(device)
 
-    scene_ds = BOPDataset("data/lm", split="train_pbr")
-    dset = ObjectsDataset(scene_ds)
-    N_train = int(len(dset) * 0.8)
-    N_test = len(dset) - N_train
-    dset_train, dset_test = torch.utils.data.random_split(
-        dset, [N_train, N_test])
+    single_scene_ds = BOPDataset("data/lm", split="train_single")
+    single_dset = ObjectsDataset(
+        single_scene_ds, chunks=conf["train"]["chunks"], augment_rotations=conf["train"]["augment_rotations"])
+
+    # scene_ds = BOPDataset("data/lm", split="train_pbr")
+    # multi_dset = ObjectsDataset(
+    #     scene_ds, chunks=conf["train"]["chunks"], augment_rotations=conf["train"]["augment_rotations"])
+    # N_multi = int(len(single_dset) * 0.5)
+
+    # dset = torch.utils.data.ConcatDataset([single_dset, subdset])
+    dset = single_dset
+    print("Dataset has ", len(dset), "instances")
+
+    pi = np.random.permutation(len(dset))
+
+    N_train = int(len(dset) * 0.85)
+    print("Using", N_train, "training instances")
+
+    train_indices = pi[:N_train]
+    test_indices = pi[N_train:]
+    print(train_indices[:10])
+
+    dset_train = torch.utils.data.Subset(dset, train_indices)
+    dset_test = torch.utils.data.Subset(dset, test_indices)
 
     print(
         "dset z_near {}, z_far {}, lindisp {}".format(
-            dset.z_near, dset.z_far, dset.lindisp)
+            single_dset.z_near, single_dset.z_far, single_dset.lindisp)
     )
 
     net = make_model(conf["model"]).to(device=device)
@@ -355,17 +378,15 @@ if __name__ == '__main__':
 
     renderer = NeRFRenderer.from_conf(
         conf["renderer"],
-        lindisp=dset.lindisp,
+        lindisp=single_dset.lindisp,
         eval_batch_size=args.eval_batch_size
     ).to(device=device)
 
     # Parallize
     render_par = renderer.bind_parallel(net, args.gpu_id).eval()
 
-    print(renderer.eval_batch_size)
-
     nviews = list(map(int, args.nviews.split()))
 
     trainer = PixelNeRFTrainer(
-        net, dset_train, dset_test, args, conf, (dset.z_near, dset.z_far), device)
+        net, dset_train, dset_test, args, conf, (single_dset.z_near, single_dset.z_far), device)
     trainer.start()

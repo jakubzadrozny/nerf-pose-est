@@ -30,7 +30,9 @@ class PixelNeRFNet(torch.nn.Module):
         # So that all objects, regardless of camera distance to center, will
         # be centered at z=0.
         # Only makes sense in ShapeNet-type setting.
-        self.normalize_z = conf.get_bool("normalize_z", True)
+        self.normalize_z = conf.get_bool("normalize_z", False)
+
+        print("Normalizing z?", self.normalize_z)
 
         self.stop_encoder_grad = (
             stop_encoder_grad  # Stop ConvNet gradient (freeze weights)
@@ -122,7 +124,8 @@ class PixelNeRFNet(torch.nn.Module):
         # Handle various focal length/principal point formats
         if len(focal.shape) == 0:
             # Scalar: fx = fy = value for all views
-            focal = torch.full((self.num_objs, 1, 2), focal)
+            focal = torch.full((self.num_objs, 1, 2),
+                               focal, device=poses.device)
         elif len(focal.shape) == 1:
             # Vector f: fx = fy = f_i *for view i*
             # Length should match NS (or 1 for broadcast)
@@ -135,12 +138,14 @@ class PixelNeRFNet(torch.nn.Module):
 
         if c is None:
             # Default principal point is center of image
-            cx = torch.full((self.num_objs, 1, 1), self.image_shape[0] * 0.5)
-            cy = torch.full((self.num_objs, 1, 1), self.image_shape[1] * 0.5)
+            cx = torch.full((self.num_objs, 1, 1),
+                            self.image_shape[0] * 0.5, device=poses.device)
+            cy = torch.full((self.num_objs, 1, 1),
+                            self.image_shape[1] * 0.5, device=poses.device)
             c = torch.cat((cx, cy), dim=-1)
         elif len(c.shape) == 0:
             # Scalar: cx = cy = value for all views
-            c = torch.full((self.num_objs, 1, 2), c)
+            c = torch.full((self.num_objs, 1, 2), c, device=poses.device)
         elif len(c.shape) == 1:
             # Vector c: cx = cy = c_i *for view i*
             c = c[:, None, None].repeat((1, 1, 2))
@@ -333,3 +338,7 @@ class PixelNeRFNet(torch.nn.Module):
             copyfile(ckpt_path, ckpt_backup_path)
         torch.save(self.state_dict(), ckpt_path)
         return self
+
+    def requires_grad(self, val):
+        for p in self.parameters():
+            p.requires_grad_(val)

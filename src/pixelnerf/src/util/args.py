@@ -1,6 +1,4 @@
-import sys
 import os
-
 
 import argparse
 from pyhocon import ConfigFactory
@@ -37,6 +35,9 @@ def parse_args(
                         help="continue training")
     parser.add_argument(
         "--gpu_id", type=str, default="0", help="GPU(s) to use, space delimited"
+    )
+    parser.add_argument(
+        "--ncpus", type=int, default=4, help="Number of CPU cores available"
     )
     parser.add_argument(
         "--name", "-n", type=str, default=default_expname, help="experiment name"
